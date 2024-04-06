@@ -210,8 +210,10 @@ function Home({
       );
       if (mailfromlocal) {
         console.log("there is mail from local ie.,", mailfromlocal);
-        DispatchMails(mailfromlocal.Mail, mailfromlocal?.Body);
-        await UpdateArrayWithLatestMail(data);
+        await DispatchMails(mailfromlocal.Mail, mailfromlocal?.Body);
+        // setTimeout(async () => {
+        //   await UpdateArrayWithLatestMail(data);
+        // }, 10000);
         // setStoreObj(obj);
       } else {
         client = new ImapFlow(data);
@@ -227,9 +229,10 @@ function Home({
         );
         folder.mailStatus = obj.status;
         WriteFile(path.join(folder.user, "conf", "conf.txt"), folder);
-        console.log(obj, "before dispatch", folder);
         DispatchMails(obj.Mail, obj.parsedjson);
-        // await UpdateArrayWithLatestMail(data);
+        // setTimeout(async () => {
+        //   await UpdateArrayWithLatestMail(data);
+        // }, 10000);
         settLen(obj.Mail.length);
         delete obj.parsedjson;
         setStoreObj(obj);
@@ -238,10 +241,11 @@ function Home({
   }
 
   async function DispatchMails(envelopearray, Messagesarray) {
-    console.log(envelopearray, Messagesarray, "at dispatch");
-
-    dispatch(setEnvelope(envelopearray));
-    dispatch(setAllMail(Messagesarray));
+    console.log(Envelope, maillist, "before dispatch");
+    console.log(envelopearray, Messagesarray, "at dispatch", user?.auth?.user);
+    await dispatch(setEnvelope(envelopearray));
+    await dispatch(setAllMail(Messagesarray));
+    console.log(Envelope, maillist, "after dispatch", user?.auth?.user);
     setfetchedCount(envelopearray?.length ? envelopearray.length : 0);
     dispatch(setLoading(false));
   }
@@ -279,7 +283,6 @@ function Home({
       WriteFile(inboxpath(userHome, "mail"), StoreObj);
     }
   }
-
   async function FetchUptoNextLimit() {
     dispatch(setLoading(true));
     let rlen = tLen - fetchedCount;

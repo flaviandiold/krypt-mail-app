@@ -5,9 +5,14 @@ import React from "react";
 import { MdAttachment, MdClose } from "react-icons/md";
 import AttachMents from "./AttachMents";
 import "./MailStyle.css";
+import { EditorState } from "draft-js";
+import ComposeBox from "./ComposeBox";
 const NodeRSA = require("node-rsa");
+const crypto = require("crypto");
 const axios = require("axios");
-
+const algorithm = "aes-256-cbc";
+const aes_key = Buffer.from("jnvksdbvdvfdvdfvdfvc23r44dfvdfvn");
+const iv = Buffer.from("jnvkscsdvsdvdfvn");
 function DisplayMails({
   Html,
   subject,
@@ -22,31 +27,93 @@ function DisplayMails({
   currMail,
   setisAnyMail,
   text,
+  userHome,
 }) {
   let date = new Date(time);
   let attachments = currMail?.attachments;
   // console.log("works on view mail", mailinfo, currMail, text);
+  const [editorState, setEditorState] = React.useState(() =>
+    EditorState.createEmpty()
+  );
+  const [forwarding, setForwarding] = useState(false);
+  const [isForwardable, setIsForwardable] = useState(true);
   let [mail, setMail] = useState("");
   function fileDownload(file) {
     DownloadAttachMents(file);
   }
   const fetchMailData = async () => {
+    const data = (
+      await axios.get(
+        `http://0.0.0.0:3000/mail/${mailinfo[6].line.split("Message-ID: ")[1]}`
+      )
+    ).data;
+    console.log(data, "mail data from db");
+    if (!data) {
+      setMail(Html ? Html : text);
+      return;
+    }
+    setIsForwardable(data.forwardable ?? true);
     const publicKey = (
-      await axios.get(`http://localhost:3000/user/public-key/${from}`)
+      await axios.get(`http://0.0.0.0:3000/user/public-key/${from}`)
     ).data.publicKey;
-    console.log(publicKey);
-    console.log(Html);
-    setMail(
-      Html
-        ? decrypt(Html, publicKey, "public")
-        : decrypt(text, publicKey, "public")
-    );
-    console.log(mail);
+
+    console.log(userHome);
+    let privateKey = localStorage.getItem(`privateKey:${userHome}`);
+    if (!privateKey) {
+      const token = localStorage.getItem(`token:${userHome}`);
+      privateKey = (
+        await axios.post(
+          `http://0.0.0.0:3000/user/private-key/${token.substring(
+            1,
+            token.length - 1
+          )}`
+        )
+      ).data.privateKey;
+    } else {
+      let temp = "";
+      for (let i = 0; i < privateKey.length - 1; i++) {
+        if (privateKey.charAt(i) === "\\" && privateKey.charAt(i + 1) === "n") {
+          i++;
+          continue;
+        }
+        temp = temp + privateKey.charAt(i);
+      }
+      privateKey = temp.substring(1, temp.length - 1) + "-";
+      console.log(privateKey, 'replacing "\\n"');
+    }
+
+    const decipher = crypto.createDecipheriv(algorithm, aes_key, iv);
+
+    console.log(aes_key.length, iv.length);
+    let decrypted = decipher.update(privateKey, "base64url", "utf8");
+    privateKey = decrypted;
+
+    privateKey = privateKey.substring(0, privateKey.lastIndexOf("-") + 1);
+    switch (data.depth) {
+      case 0:
+        setMail(data.content);
+        break;
+      case 1:
+        setMail(decrypt(data.content, publicKey, "public"));
+        break;
+      case 2:
+        setMail(
+          decrypt(
+            decrypt(data.content, privateKey, "private"),
+            publicKey,
+            "public"
+          )
+        );
+        break;
+      default:
+        setMail(Html ? Html : text);
+        break;
+    }
   };
 
   useEffect(() => {
     //   const publicKey = (
-    //     await axios.get(`http://localhost:3000/user/public-key/${from}`)
+    //     await axios.get(`http://0.0.0.0:3000/user/public-key/${from}`)
     //   ).data.publicKey;
     //   // console.log(publicKey);
     //   // console.log(Html);
@@ -130,6 +197,34 @@ function DisplayMails({
           );
         })}
       </div>
+      <div>
+        <div className="px-4 py-3 bg-gray-50 text-right sm:px-6">
+          {isForwardable && (
+            <button
+              onClick={() => setForwarding(!forwarding)}
+              className="inline-block px-5 py-3 mt-8 text-sm font-medium hover:bg-primary bg-primary rounded-tl-2xl rounded-br-2xl text-BannerCardButtonText shadow-lg "
+            >
+              Forward
+            </button>
+          )}
+          <div>
+            {forwarding && (
+              <ComposeBox
+                editorState={editorState}
+                setEditorState={setEditorState}
+                composeopen={composeopen}
+                setcomposeopen={setcomposeopen}
+                toadress=""
+                subject={"Fwd: " + subject}
+                action="forward"
+                userHome={userHome}
+                message={text.replace(/<[^>]*>/g, "")}
+                setForwarding={setForwarding}
+              />
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -138,11 +233,11 @@ function decrypt(body, key, type) {
   if (body.includes("Break from here")) {
     body = body.split("Break from here")[0];
   }
-  if (body.startsWith("<meta")) {
+  if (body.startsWith("<")) {
     body = body.substring(body.indexOf(">") + 1, body.length);
   }
   console.log(body);
-  // console.log(key);
+  console.log(key);
   const decryptKey = new NodeRSA(key, type);
   let result;
   switch (type) {

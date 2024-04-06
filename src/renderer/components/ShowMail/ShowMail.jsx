@@ -44,7 +44,6 @@ function ShowMail({
   const location = useLocation();
   let paths = location?.pathname == "/" ? "INBOX" : location?.state;
   let client, client_single;
-
   useEffect(() => {
     for (let index = 0; index < message?.length; index++) {
       if (message[index]?.envelope?.messageId === openedmail?.messageId) {
@@ -170,6 +169,7 @@ function ShowMail({
               DownloadAttachMents(file);
             }}
             setisAnyMail={setisAnyMailOpen}
+            userHome={userHome}
           />
         )}
       </div>
@@ -186,6 +186,7 @@ function ShowMail({
                 subject={ActiveMail.subject}
                 action={actionFromReply}
                 userHome={userHome}
+                message=""
               />
             </div>
           </div>

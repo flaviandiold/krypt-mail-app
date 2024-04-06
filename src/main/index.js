@@ -14,8 +14,8 @@ const isDev = !app.isPackaged;
 
 let mainWindow;
 function loadVitePage(port) {
-  mainWindow.loadURL(`http://localhost:${port}`).catch((err) => {
-      loadVitePage(port);
+  mainWindow.loadURL(`http://0.0.0.0:${port}`).catch((err) => {
+    loadVitePage(port);
   });
 }
 

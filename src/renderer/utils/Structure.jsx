@@ -201,6 +201,7 @@ function Structure({
                       subject=""
                       action={actionFromReply}
                       userHome={userHome}
+                      message=""
                     />
                   </div>
                 )}

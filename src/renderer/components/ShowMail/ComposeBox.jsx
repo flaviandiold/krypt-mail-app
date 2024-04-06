@@ -1,11 +1,12 @@
 import { convertToHTML } from "draft-convert";
-import { convertToRaw } from "draft-js";
+import { convertToRaw, ContentState, EditorState } from "draft-js";
 import React, { useEffect, useState } from "react";
 import { Editor } from "react-draft-wysiwyg";
 import { MdCancel, MdStyle, MdTextFields } from "react-icons/md";
 import { RiSendPlaneLine } from "react-icons/ri";
 import { Resizable } from "re-resizable";
 import { readFile } from "../../lib/fileAction";
+import { v4 } from "uuid";
 const axios = require("axios");
 const crypto = require("crypto");
 const NodeRSA = require("node-rsa");
@@ -24,13 +25,23 @@ function ComposeBox({
   subject,
   action,
   userHome,
+  message,
+  setForwarding,
 }) {
+  const [depth, setDepth] = useState(0);
+  console.log(depth, "depth");
   const [toAddress, settoAdress] = React.useState(toadress);
   const [Subject, setSubject] = React.useState(subject);
   const [body, setbody] = React.useState("");
+  // console.log(body);
   const [styledtext, setstyledtext] = useState(false);
   const blocks = convertToRaw(editorState?.getCurrentContent()).blocks;
   const [isDisabled, setisDisabled] = useState(false);
+  const [encryptIsDisabled, setEncryptIsDisabled] = useState(false);
+  const [showPuKey, setShowPuKey] = useState(false);
+  const [encryption, setEncryption] = useState(false);
+  const [cancelForwarding, setCancelForwarding] = useState(false);
+  const publicKey = { data: "" };
   const value = blocks
     .map((block) => (!block.text.trim() && "\n") || block.text)
     .join("\n");
@@ -39,12 +50,21 @@ function ComposeBox({
     const currentContentAsHTML = convertToHTML(
       editorState?.getCurrentContent()
     );
+    console.log(currentContentAsHTML);
     setbody(currentContentAsHTML);
   };
 
   useEffect(() => {
     convertContentToHTML();
   }, [value]);
+
+  useEffect(() => {
+    const contentState = ContentState.createFromText(body);
+    setEditorState(
+      EditorState.push(editorState, contentState, "replace-content")
+    );
+    convertContentToHTML();
+  }, [encryption]);
 
   const uploadCallback = (file, callback) => {
     return new Promise((resolve, reject) => {
@@ -76,9 +96,23 @@ function ComposeBox({
               <MdTextFields size={25} className=" " />
             )}
           </button>
-          <button className="m-2" onClick={() => setcomposeopen(!composeopen)}>
-            <MdCancel size={25} className="" />
-          </button>
+          {action === "forward" ? (
+            <button
+              className="m-2"
+              onClick={() => {
+                setForwarding(false);
+              }}
+            >
+              <MdCancel size={25} className="" />
+            </button>
+          ) : (
+            <button
+              className="m-2"
+              onClick={() => setcomposeopen(!composeopen)}
+            >
+              <MdCancel size={25} className="" />
+            </button>
+          )}
         </div>
       </div>
       <div className="p-2 border-b border-b-SideBarBackground  m-2 mx-2   flex">
@@ -110,68 +144,229 @@ function ComposeBox({
         />
       </div>
       <div className="grow p-2 mx-2 max-h-full grid  rounded-2xl text-text text-opacity-70   ">
-        <Editor
-          editorState={editorState}
-          defaultEditorState={editorState}
-          onEditorStateChange={setEditorState}
-          toolbarClassName=""
-          toolbarHidden={!styledtext}
-          toolbar={{
-            options: [
-              "inline",
-              "fontSize",
-              "fontFamily",
-              "image",
-              "list",
-              "textAlign",
-              "emoji",
-              "remove",
-              "history",
-            ],
-            image: {
-              previewImage: true,
-              uploadEnabled: true,
-              urlEnabled: false,
-              uploadCallback: uploadCallback,
-              defaultSize: {
-                height: 100,
-                width: 100,
+        {action === "forward" ? (
+          <Editor
+            placeholder={message}
+            editorState={editorState}
+            defaultEditorState={editorState}
+            onEditorStateChange={setEditorState}
+            toolbarClassName=""
+            toolbarHidden={!styledtext}
+            toolbar={{
+              options: [
+                "inline",
+                "fontSize",
+                "fontFamily",
+                "image",
+                "list",
+                "textAlign",
+                "emoji",
+                "remove",
+                "history",
+              ],
+              image: {
+                previewImage: true,
+                uploadEnabled: true,
+                urlEnabled: false,
+                uploadCallback: uploadCallback,
+                defaultSize: {
+                  height: 100,
+                  width: 100,
+                },
+                alignmentEnabled: true,
               },
-              alignmentEnabled: true,
-            },
-          }}
-          editorClassName="bg-BannerCardBackground text-BannerCardText scroll-smooth   scrollbar-thin  scrollbar-thumb-primary scrollbar-track-windowBarBackground  scrollbar-thumb-rounded-full scrollbar-track-rounded-full"
-          wrapperClassName=""
-          className="opacity-70 max-w-full  
+            }}
+            editorClassName="bg-BannerCardBackground text-BannerCardText scroll-smooth   scrollbar-thin  scrollbar-thumb-primary scrollbar-track-windowBarBackground  scrollbar-thumb-rounded-full scrollbar-track-rounded-full"
+            wrapperClassName=""
+            className="opacity-70 max-w-full  
                 max-h-full 
                 "
-          wrapperStyle={{
-            height: 300,
-          }}
-          placeholder="Type your mail body"
-          editorStyle={{
-            width: "100%",
-          }}
-          toolbarCustomButtons={[
-            <SendBtn
-              handler={() =>
-                SendMail(
-                  toAddress,
-                  Subject,
-                  body,
-                  File,
-                  setFile,
-                  userHome,
-                  setisDisabled
-                )
-              }
-              isdisabled={isDisabled}
-              setisDisabled={setisDisabled}
-            />,
-          ]}
-        />
-        {!styledtext && (
+            wrapperStyle={{
+              height: 300,
+            }}
+            editorStyle={{
+              width: "100%",
+            }}
+            toolbarCustomButtons={[
+              <SendBtn
+                text={"Send"}
+                handler={() =>
+                  SendMail(
+                    toAddress,
+                    Subject,
+                    message,
+                    File,
+                    setFile,
+                    userHome,
+                    setisDisabled,
+                    depth,
+                    cancelForwarding
+                  )
+                }
+                isdisabled={isDisabled}
+                setisDisabled={setisDisabled}
+              />,
+            ]}
+          />
+        ) : (
+          <Editor
+            editorState={editorState}
+            defaultEditorState={editorState}
+            onEditorStateChange={setEditorState}
+            toolbarClassName=""
+            toolbarHidden={!styledtext}
+            toolbar={{
+              options: [
+                "inline",
+                "fontSize",
+                "fontFamily",
+                "image",
+                "list",
+                "textAlign",
+                "emoji",
+                "remove",
+                "history",
+              ],
+              image: {
+                previewImage: true,
+                uploadEnabled: true,
+                urlEnabled: false,
+                uploadCallback: uploadCallback,
+                defaultSize: {
+                  height: 100,
+                  width: 100,
+                },
+                alignmentEnabled: true,
+              },
+            }}
+            editorClassName="bg-BannerCardBackground text-BannerCardText scroll-smooth   scrollbar-thin  scrollbar-thumb-primary scrollbar-track-windowBarBackground  scrollbar-thumb-rounded-full scrollbar-track-rounded-full"
+            wrapperClassName=""
+            className="opacity-70 max-w-full  
+                max-h-full 
+                "
+            wrapperStyle={{
+              height: 300,
+              width: 1000,
+            }}
+            placeholder="Type your mail body"
+            editorStyle={{
+              width: "100%",
+            }}
+            toolbarCustomButtons={[
+              <SendBtn
+                handler={() =>
+                  SendMail(
+                    toAddress,
+                    Subject,
+                    body,
+                    File,
+                    setFile,
+                    userHome,
+                    setisDisabled,
+                    depth,
+                    cancelForwarding
+                  )
+                }
+                isdisabled={isDisabled}
+                setisDisabled={setisDisabled}
+              />,
+            ]}
+          />
+        )}
+        <div>
+          {!styledtext && !showPuKey && (
+            <>
+              <EncryptBtn
+                text={"Encrypt"}
+                handler={() =>
+                  encryptHandler(
+                    body,
+                    setbody,
+                    setShowPuKey,
+                    setisDisabled,
+                    userHome,
+                    toAddress,
+                    setEncryption,
+                    setDepth,
+                    false
+                  )
+                }
+                isDisabled={encryptIsDisabled}
+                setisDisabled={setEncryptIsDisabled}
+              />
+              {cancelForwarding ? (
+                <ForwardConfBtn
+                  text={"Allow Forwarding"}
+                  handler={() => {
+                    setCancelForwarding(false);
+                  }}
+                />
+              ) : (
+                <ForwardConfBtn
+                  text={"Cancel Forwarding"}
+                  handler={() => {
+                    setCancelForwarding(true);
+                  }}
+                />
+              )}
+              <SendBtn
+                handler={() => {
+                  SendMail(
+                    toAddress,
+                    Subject,
+                    body,
+                    File,
+                    setFile,
+                    userHome,
+                    setisDisabled,
+                    depth,
+                    cancelForwarding
+                  );
+                }}
+                isdisabled={isDisabled}
+                setisDisabled={setisDisabled}
+              />
+            </>
+          )}
+        </div>
+      </div>
+      {showPuKey && (
+        <div>
+          <EncryptBtn
+            text={"External Encrypt"}
+            handler={() =>
+              encryptHandler(
+                body,
+                setbody,
+                setShowPuKey,
+                setisDisabled,
+                userHome,
+                toAddress,
+                setEncryption,
+                setDepth,
+                true
+              )
+            }
+            isdisabled={isDisabled}
+            setisDisabled={setisDisabled}
+          />
+          {cancelForwarding ? (
+            <ForwardConfBtn
+              text={"Allow Forwarding"}
+              handler={() => {
+                setCancelForwarding(false);
+              }}
+            />
+          ) : (
+            <ForwardConfBtn
+              text={"Cancel Forwarding"}
+              handler={() => {
+                setCancelForwarding(true);
+              }}
+            />
+          )}
           <SendBtn
+            text={"Encrypt and Send"}
             handler={() =>
               SendMail(
                 toAddress,
@@ -180,56 +375,42 @@ function ComposeBox({
                 File,
                 setFile,
                 userHome,
-                setisDisabled
+                setisDisabled,
+                depth,
+                cancelForwarding
               )
             }
-            isdisabled={isDisabled}
-            setisDisabled={setisDisabled}
           />
-        )}
-      </div>
+          <AddPublicKey
+            text={"Add public key"}
+            handler={() =>
+              SendPublicKey(toAddress, publicKey, setShowPuKey, setisDisabled)
+            }
+            publicKey={publicKey}
+          />
+        </div>
+      )}
     </Resizable>
   );
 }
 
-async function encrypt(body, key, type) {
-  const encryptKey = new NodeRSA(key);
-  let result;
-  switch (type) {
-    case "public":
-      result = encryptKey.encrypt(body, "base64");
-      break;
-    case "private":
-      console.log("encrypting with private key");
-      result = encryptKey.encryptPrivate(body, "base64");
-      break;
-    default:
-      result = encryptKey.encrypt(body, "base64");
-  }
-  console.log(result);
-  return result;
-}
-async function SendMail(
-  toAddress,
-  subject,
+async function encryptHandler(
   body,
-  fileUri,
-  setFile,
+  setbody,
+  setShowPuKey,
+  setisDisabled,
   userHome,
-  setisDisabled
+  toAddress,
+  setEncryption,
+  setDepth,
+  externalEncrypt
 ) {
-  setisDisabled(true);
-  const conf = JSON.parse(readFile(path.join(userHome, "smtp.txt")))
-    ? JSON.parse(readFile(path.join(userHome, "smtp.txt")))
-    : null;
-  console.log("comes here", conf);
-  const transporter = nodemailer.createTransport(conf);
   let privateKey = localStorage.getItem(`privateKey:${userHome}`);
   if (!privateKey) {
     const token = localStorage.getItem(`token:${userHome}`);
     privateKey = (
       await axios.post(
-        `http://localhost:3000/user/private-key/${token.substring(
+        `http://0.0.0.0:3000/user/private-key/${token.substring(
           1,
           token.length - 1
         )}`
@@ -245,39 +426,153 @@ async function SendMail(
       temp = temp + privateKey.charAt(i);
     }
     privateKey = temp.substring(1, temp.length - 1) + "-";
-    console.log(privateKey, 'replacing "\\n"');
   }
-  console.log(userHome);
+
   const decipher = crypto.createDecipheriv(algorithm, aes_key, iv);
-  console.log(privateKey, "before decryption");
-  console.log(aes_key.length, iv.length);
+
   let decrypted = decipher.update(privateKey, "base64url", "utf8");
-  // decrypted += decipher.final("utf8");
-  privateKey = decrypted.split(
-    "92o3ryno2uu0[.rg2l[rgkp02.f,jp9u23yho8fg237n"
-  )[0];
-  console.log(privateKey, "after decryption");
-  console.log(body, "before");
-  body = await encrypt(body, privateKey, "private");
-  console.log(body, "after");
-  const html =
-    body +
-    'Break from here <br><p>If you are using a different client other than KryptMail try using <a href="https://www.freecodecamp.org/" target="_blank" rel="noopener noreferrer">this</a> link.</p>';
+  // decrypted += decipher.final("utf-8");
+  privateKey = decrypted;
+
+  privateKey = privateKey.substring(0, privateKey.lastIndexOf("-") + 1);
+  if (!externalEncrypt) {
+    let publicKey = (
+      await axios.get(`http://0.0.0.0:3000/user/public-key/${toAddress}`)
+    ).data.publicKey;
+    console.log(toAddress, publicKey);
+    if (!publicKey) {
+      alert(
+        "The recipient is not a registered KryptMail user, you can risk sending it without encryption or enter their public key below"
+      );
+      setShowPuKey(true);
+      setisDisabled(true);
+    } else {
+      body = await encrypt(
+        await encrypt(body, privateKey, "private"),
+        publicKey,
+        "public"
+      );
+      const html =
+        body +
+        'Break from here <br><p>If you are using a different client other than KryptMail try using <a href="https://www.freecodecamp.org/" target="_blank" rel="noopener noreferrer">this</a> link.</p>';
+      setbody(html);
+      setEncryption(true);
+      setDepth(2);
+    }
+  } else {
+    body = await encrypt(body, privateKey, "private");
+    setbody(body);
+    setEncryption(true);
+    setDepth(1);
+  }
+}
+
+async function storeMail({
+  messageId,
+  to,
+  from,
+  content,
+  depth,
+  forwardable = true,
+  timecode = -1, // month, hour, sec, days
+  timeframe = -1, // how long
+}) {
+  // while (true) {
+  const success = (
+    await axios.post(`http://0.0.0.0:3000/mail`, {
+      messageId,
+      to,
+      from,
+      content,
+      depth,
+      forwardable,
+      timecode,
+      timeframe,
+    })
+  ).data.success;
+  // if (success) break;
+  // }
+}
+
+async function SendPublicKey(
+  toAddress,
+  publicKey,
+  setShowPuKey,
+  setisDisabled
+) {
+  console.log(toAddress, publicKey);
+  await axios.post(`http://0.0.0.0:3000/user/public-key/${toAddress}`, {
+    publicKey: publicKey["data"],
+  });
+  setShowPuKey(false);
+  setisDisabled(false);
+}
+
+async function encrypt(body, key, type) {
+  const encryptKey = new NodeRSA(key);
+  console.log(key);
+  let result;
+  switch (type) {
+    case "public":
+      result = encryptKey.encrypt(body, "base64");
+      break;
+    case "private":
+      console.log("encrypting with private key");
+      result = encryptKey.encryptPrivate(body, "base64");
+      break;
+    default:
+      result = encryptKey.encrypt(body, "base64");
+  }
+  console.log(result);
+  return result;
+}
+
+async function SendMail(
+  toAddress,
+  subject,
+  body,
+  fileUri,
+  setFile,
+  userHome,
+  setisDisabled,
+  depth,
+  cancelForwarding
+) {
+  setisDisabled(true);
+  const conf = JSON.parse(readFile(path.join(userHome, "smtp.txt")))
+    ? JSON.parse(readFile(path.join(userHome, "smtp.txt")))
+    : null;
+  const transporter = nodemailer.createTransport(conf);
+  let content = null;
+  let token;
+  if (depth === 1 || cancelForwarding) {
+    content = body;
+    token = v4();
+    body = `Open this <a href="http://localhost:8080/?messageId=${token}" target="_blank" rel="noopener noreferrer">link</a> to view the mail`;
+  }
   let mailOptions = {
     from: userHome,
     to: toAddress,
     subject: subject,
     text: body,
-    html: html,
+    html: body,
     attachments: fileUri?.length > 0 ? fileUri : false,
   };
-  // console.log(mailOptions.text);
-  transporter.sendMail(mailOptions, function (error, info) {
+  transporter.sendMail(mailOptions, async function (error, info) {
     if (error) {
       alert("error sending mail");
       setisDisabled(false);
     } else {
       alert("message sent successfully");
+      console.log(cancelForwarding, "skjndvjsd");
+      await storeMail({
+        messageId: token ? token : info.messageId,
+        to: toAddress,
+        from: userHome,
+        content: content ? content : body,
+        depth: depth,
+        forwardable: !cancelForwarding,
+      });
       setFile([]);
       transporter.close();
       setisDisabled(false);
@@ -297,6 +592,61 @@ function SendBtn({ handler, isdisabled }) {
       >
         Send
         <RiSendPlaneLine size={25} className="  text-BannerCardButtonText " />
+      </button>
+    </div>
+  );
+}
+
+function AddPublicKey({ handler, text, publicKey }) {
+  return (
+    <div className="">
+      <span className="mr-2 ">Public Key:</span>
+      <input
+        id="publicKey"
+        type="text"
+        placeholder={text}
+        // onChange={(e) => {
+        //   console.log(e);
+        //   publicKey.data += e.nativeEvent.data;
+        // }}
+        className=" bg-BannerCardBackground  w-full outline-none "
+      />
+      <button
+        className="p-2 bg-BannerCardButtonBackground items-center text-BannerCardButtonText self-end flex font-bold px-2 rounded-md shadow-lg m-2 z-50 "
+        onClick={() => {
+          publicKey.data = document.getElementById("publicKey").value;
+
+          handler();
+        }}
+      >
+        Add Public Key
+      </button>
+    </div>
+  );
+}
+
+function EncryptBtn({ text, handler, isDisabled }) {
+  return (
+    <div>
+      <button
+        className="p-2 bg-BannerCardButtonBackground items-center text-BannerCardButtonText self-end flex font-bold px-2 rounded-md shadow-lg m-2 z-50 "
+        onClick={handler}
+        disabled={isDisabled}
+      >
+        {text}
+      </button>
+    </div>
+  );
+}
+
+function ForwardConfBtn({ text, handler }) {
+  return (
+    <div>
+      <button
+        className="p-2 bg-BannerCardButtonBackground items-center text-BannerCardButtonText self-end flex font-bold px-2 rounded-md shadow-lg m-2 z-50 "
+        onClick={handler}
+      >
+        {text}
       </button>
     </div>
   );

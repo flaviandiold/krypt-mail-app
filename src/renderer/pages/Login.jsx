@@ -115,7 +115,7 @@ function Login({ frommultiuser }) {
               console.log(imapObj);
               // password = await encoder.hash(password, 10);
               const data = (
-                await axios.post("http://localhost:3000/user/register", {
+                await axios.post("http://0.0.0.0:3000/user/register", {
                   email,
                   password,
                 })
