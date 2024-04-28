@@ -19,6 +19,7 @@ import { readFile } from "../lib/fileAction";
 import { applyTheme } from "../themes/themeutil";
 import { setUser, setUsersList } from "../redux/actions/UserActions";
 import { Link } from "react-router-dom";
+import Register from "./Register";
 // import * as encoder from "bcrypt";
 
 const axios = require("axios");
@@ -115,17 +116,18 @@ function Login({ frommultiuser }) {
               console.log(imapObj);
               // password = await encoder.hash(password, 10);
               const data = (
-                await axios.post("http://0.0.0.0:3000/user/register", {
+                await axios.post("http://0.0.0.0:3000/user/login", {
                   email,
                   password,
                 })
               ).data;
               console.log(data.privateKey, data.token);
+
               if (!localStorage.getItem(`privateKey:${email}`)) {
-                localStorage.setItem(
-                  `privateKey:${email}`,
-                  JSON.stringify(data.privateKey)
-                );
+                // localStorage.setItem(
+                //   `privateKey:${email}`,
+                //   JSON.stringify(data.privateKey)
+                // );
               }
               if (!localStorage.getItem(`token:${email}`)) {
                 localStorage.setItem(
@@ -141,7 +143,11 @@ function Login({ frommultiuser }) {
             }
           } catch (error) {
             console.log(error);
-            setErrors("something went wrong while logging in");
+            if (error instanceof axios.AxiosError) {
+              setErrors(error.response.data.message);
+            } else {
+              setErrors("something went wrong while logging in");
+            }
             dispatch(setLoading(false));
           }
         } else {
@@ -240,6 +246,12 @@ function Login({ frommultiuser }) {
                 setvisible={setvisible}
               />
             </div>
+            {/* <InputField
+              label="passphrase"
+              placeholder="Enter Passphrase for your key"
+              value={passphrase}
+              updatedValue={setpassphrase}
+            /> */}
             {/* <div className="grid grid-cols-2  ">
               <InputField
                 label="host"
@@ -276,9 +288,11 @@ function Login({ frommultiuser }) {
                 handler={onLoginClick}
               />
 
-              {/* <Link to={{ pathname: "/register" }} state={"/register"}>
-                <Button btntext={"Register"} />
-              </Link> */}
+              {!frommultiuser && (
+                <Link to={{ pathname: "/register" }} state={"/register"}>
+                  <Button btntext={"Register"} />
+                </Link>
+              )}
             </div>
             {Errors && (
               <span className="font-extrabold text-primary-text mt-4 text-center align-middle ">

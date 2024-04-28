@@ -2,20 +2,17 @@ import { convertToHTML } from "draft-convert";
 import { convertToRaw, ContentState, EditorState } from "draft-js";
 import React, { useEffect, useState } from "react";
 import { Editor } from "react-draft-wysiwyg";
-import { MdCancel, MdStyle, MdTextFields } from "react-icons/md";
+import { MdCancel, MdInput, MdStyle, MdTextFields } from "react-icons/md";
 import { RiSendPlaneLine } from "react-icons/ri";
 import { Resizable } from "re-resizable";
 import { readFile } from "../../lib/fileAction";
 import { v4 } from "uuid";
+const openpgp = require("openpgp");
+
 const axios = require("axios");
-const crypto = require("crypto");
-const NodeRSA = require("node-rsa");
 
 const nodemailer = window.require("nodemailer");
 const path = require("path");
-const algorithm = "aes-256-cbc";
-const aes_key = Buffer.from("jnvksdbvdvfdvdfvdfvc23r44dfvdfvn");
-const iv = Buffer.from("jnvkscsdvsdvdfvn");
 function ComposeBox({
   editorState,
   setEditorState,
@@ -31,8 +28,10 @@ function ComposeBox({
   const [depth, setDepth] = useState(0);
   console.log(depth, "depth");
   const [toAddress, settoAdress] = React.useState(toadress);
+  const [passphrase, setPassphrase] = useState("");
   const [Subject, setSubject] = React.useState(subject);
   const [body, setbody] = React.useState("");
+  const [showPassphraseBox, setShowPassphraseBox] = useState(false);
   // console.log(body);
   const [styledtext, setstyledtext] = useState(false);
   const blocks = convertToRaw(editorState?.getCurrentContent()).blocks;
@@ -41,6 +40,8 @@ function ComposeBox({
   const [showPuKey, setShowPuKey] = useState(false);
   const [encryption, setEncryption] = useState(false);
   const [cancelForwarding, setCancelForwarding] = useState(false);
+  const [password, setPassword] = useState("");
+  const [showPasswordBox, setShowPasswordBox] = useState(false);
   const publicKey = { data: "" };
   const value = blocks
     .map((block) => (!block.text.trim() && "\n") || block.text)
@@ -66,6 +67,245 @@ function ComposeBox({
     convertContentToHTML();
   }, [encryption]);
 
+  const encryptHandler = async (
+    body,
+    setbody,
+    setShowPuKey,
+    setisDisabled,
+    userHome,
+    toAddress,
+    setEncryption,
+    setDepth,
+    externalEncrypt,
+    passphrase
+  ) => {
+    // let privateKey = localStorage.getItem(`privateKey:${userHome}`);
+
+    const token = localStorage.getItem(`token:${userHome}`);
+    const privateKey = (
+      await axios.post(
+        `http://0.0.0.0:3000/user/private-key/${token.substring(
+          1,
+          token.length - 1
+        )}`
+      )
+    ).data.privateKey;
+    // localStorage.setItem(`privateKey:${userHome}`, privateKey);
+
+    // console.log(privateKey);
+    // let temp = "";
+    // for (let i = 0; i < privateKey.length - 1; i++) {
+    //   if (privateKey.charAt(i) === "\\" && privateKey.charAt(i + 1) === "n") {
+    //     i++;
+    //     continue;
+    //   }
+    //   temp = temp + privateKey.charAt(i);
+    // }
+    // privateKey = privateKey.replace(/"/g, "");
+    // privateKey = privateKey.substring(1, privateKey.length - 2);
+    // privateKey = privateKey.replace(/\\[rtfbv]/g, "");
+    // console.log(privateKey);
+
+    // const decipher = crypto.createDecipheriv(algorithm, aes_key, iv);
+
+    // let decrypted = decipher.update(privateKey, "base64url", "utf8");
+    // // decrypted += decipher.final("utf-8");
+    // privateKey = decrypted;
+
+    // privateKey = privateKey.substring(0, privateKey.lastIndexOf("-") + 1);
+    if (!externalEncrypt) {
+      let publicKey = (
+        await axios.get(`http://0.0.0.0:3000/user/public-key/${toAddress}`)
+      ).data.publicKey;
+      // console.log(toAddress, publicKey);
+      if (!publicKey) {
+        alert(
+          "The recipient is not a registered KryptMail user, you can risk sending it without encryption or enter their public key below"
+        );
+        setShowPuKey(true);
+        setisDisabled(true);
+      } else {
+        body = await encrypt(privateKey, publicKey, passphrase, body);
+        const html =
+          body +
+          'Break from here <br><p>If you are using a different client other than KryptMail try using <a href="https://www.freecodecamp.org/" target="_blank" rel="noopener noreferrer">this</a> link.</p>';
+        setbody(html);
+        setEncryption(true);
+        setDepth(2);
+      }
+    } else {
+      if (password.length) {
+        console.log(passphrase, password);
+        body = await encrypt(privateKey, null, passphrase, body, password);
+        setbody(body);
+        setEncryption(true);
+        setDepth(1);
+      } else {
+        setShowPasswordBox(true);
+      }
+    }
+  };
+
+  const storeMail = async ({
+    messageId,
+    to,
+    from,
+    content,
+    depth,
+    forwardable = true,
+    timecode = -1, // month, hour, sec, days
+    timeframe = -1, // how long
+  }) => {
+    content = content.replace(/<[^>]*>/g, "\n");
+    // while (true) {
+    const success = (
+      await axios.post(`http://0.0.0.0:3000/mail`, {
+        messageId,
+        to,
+        from,
+        content,
+        depth,
+        forwardable,
+        timecode,
+        timeframe,
+      })
+    ).data.success;
+    // if (success) break;
+    // }
+  };
+
+  async function SendPublicKey(
+    toAddress,
+    publicKey,
+    setShowPuKey,
+    setisDisabled
+  ) {
+    console.log(toAddress, publicKey);
+    await axios.post(`http://0.0.0.0:3000/user/public-key/${toAddress}`, {
+      publicKey: publicKey["data"],
+    });
+    setShowPuKey(false);
+    setisDisabled(false);
+  }
+
+  const encrypt = async (
+    privateKeyArmored,
+    publicKeyArmored,
+    passphrase,
+    body,
+    password
+  ) => {
+    if (publicKeyArmored) {
+      // privateKey = privateKey.replace(/\\[rntfbv]|"/g, "");
+      // const privateKeyMidBlock = privateKey
+      //   .split("-----BEGIN PGP PRIVATE KEY BLOCK-----")[1]
+      //   .split("-----END PGP PRIVATE KEY BLOCK-----")[0];
+      // privateKey = `
+      // -----BEGIN PGP PRIVATE KEY BLOCK-----
+
+      // ${privateKeyMidBlock}
+      // -----END PGP PRIVATE KEY BLOCK-----`;
+      console.log(privateKeyArmored);
+      console.log(publicKeyArmored);
+      console.log(passphrase);
+      const privateKey = await openpgp.decryptKey({
+        privateKey: await openpgp.readPrivateKey({
+          armoredKey: privateKeyArmored,
+        }),
+        passphrase: passphrase,
+      });
+      console.log("private is not misformed");
+      const publicKey = await openpgp.readKey({
+        armoredKey: publicKeyArmored,
+      });
+      const encrypted = await openpgp.encrypt({
+        message: await openpgp.createMessage({ text: body }), // input as Message object
+        encryptionKeys: publicKey,
+        signingKeys: privateKey, // optional
+      });
+
+      return encrypted;
+    } else {
+      if (!passphrase || !passphrase.length) {
+        setShowPassphraseBox(true);
+        return body;
+      } else {
+        console.log(passphrase, password);
+
+        const privateKey = await openpgp.decryptKey({
+          privateKey: await openpgp.readPrivateKey({
+            armoredKey: privateKeyArmored,
+          }),
+          passphrase: passphrase,
+        });
+        const encrypted = await openpgp.encrypt({
+          message: await openpgp.createMessage({ text: body }), // input as Message object
+          passwords: password,
+          signingKeys: privateKey,
+        });
+
+        return encrypted;
+      }
+    }
+  };
+
+  const SendMail = async (
+    toAddress,
+    subject,
+    body,
+    fileUri,
+    setFile,
+    userHome,
+    setisDisabled,
+    depth,
+    cancelForwarding,
+    externalEncrypt
+  ) => {
+    setisDisabled(true);
+    const conf = JSON.parse(readFile(path.join(userHome, "smtp.txt")))
+      ? JSON.parse(readFile(path.join(userHome, "smtp.txt")))
+      : null;
+    const transporter = nodemailer.createTransport(conf);
+    let content = null;
+    let token;
+    if (
+      externalEncrypt ||
+      (cancelForwarding && !toAddress.includes("kryptmail.com"))
+    ) {
+      content = body;
+      token = v4();
+      body = `Open this <a href="http://localhost:8080/?messageId=${token}" target="_blank" rel="noopener noreferrer">link</a> to view the mail`;
+    }
+    let mailOptions = {
+      from: userHome,
+      to: toAddress,
+      subject: subject,
+      text: content ? body : body.replace(/<[^>]*>/g, "\n"),
+      html: content ? body : body.replace(/<[^>]*>/g, "\n"),
+      attachments: fileUri?.length > 0 ? fileUri : false,
+    };
+    transporter.sendMail(mailOptions, async function (error, info) {
+      if (error) {
+        alert("error sending mail");
+        setisDisabled(false);
+      } else {
+        alert("message sent successfully");
+        console.log(cancelForwarding, "skjndvjsd");
+        await storeMail({
+          messageId: token ? token : info.messageId,
+          to: toAddress,
+          from: userHome,
+          content: content ? content : body,
+          depth: depth,
+          forwardable: !cancelForwarding,
+        });
+        setFile([]);
+        transporter.close();
+        setisDisabled(false);
+      }
+    });
+  };
+
   const uploadCallback = (file, callback) => {
     return new Promise((resolve, reject) => {
       const reader = new window.FileReader();
@@ -84,18 +324,7 @@ function ComposeBox({
     <Resizable className=" text-BannerCardText  mt-4 bg-BannerCardBackground overflow-hidden flex flex-col z-50 rounded-lg shadow-lg   ">
       <div>
         <div className="  flex justify-between w-full   rounded-2xl">
-          <button
-            className="m-2"
-            onClick={() => {
-              setstyledtext(!styledtext);
-            }}
-          >
-            {!styledtext ? (
-              <MdStyle size={25} className=" " />
-            ) : (
-              <MdTextFields size={25} className=" " />
-            )}
-          </button>
+          <span className="m-2">Compose Box</span>
           {action === "forward" ? (
             <button
               className="m-2"
@@ -200,7 +429,8 @@ function ComposeBox({
                     userHome,
                     setisDisabled,
                     depth,
-                    cancelForwarding
+                    cancelForwarding,
+                    false
                   )
                 }
                 isdisabled={isDisabled}
@@ -264,7 +494,8 @@ function ComposeBox({
                     userHome,
                     setisDisabled,
                     depth,
-                    cancelForwarding
+                    cancelForwarding,
+                    false
                   )
                 }
                 isdisabled={isDisabled}
@@ -278,22 +509,50 @@ function ComposeBox({
             <>
               <EncryptBtn
                 text={"Encrypt"}
-                handler={() =>
-                  encryptHandler(
-                    body,
-                    setbody,
-                    setShowPuKey,
-                    setisDisabled,
-                    userHome,
-                    toAddress,
-                    setEncryption,
-                    setDepth,
-                    false
-                  )
-                }
+                handler={() => {
+                  if (passphrase.length > 0) {
+                    encryptHandler(
+                      body,
+                      setbody,
+                      setShowPuKey,
+                      setisDisabled,
+                      userHome,
+                      toAddress,
+                      setEncryption,
+                      setDepth,
+                      false,
+                      passphrase
+                    );
+                  } else {
+                    console.log("here");
+                    setShowPassphraseBox(true);
+                  }
+                }}
                 isDisabled={encryptIsDisabled}
                 setisDisabled={setEncryptIsDisabled}
               />
+              {showPassphraseBox && (
+                <div className="">
+                  <input
+                    id="passphrase"
+                    type="text"
+                    placeholder="Enter passphrase"
+                    className=" bg-BannerCardBackground  w-full outline-none "
+                  />
+                  <button
+                    className="p-2 bg-BannerCardButtonBackground items-center text-BannerCardButtonText self-end flex font-bold px-2 rounded-md shadow-lg m-2 z-50 "
+                    onClick={() => {
+                      setPassphrase(
+                        document.getElementById("passphrase").value
+                      );
+                      setShowPassphraseBox(false);
+                      // handler();
+                    }}
+                  >
+                    Submit
+                  </button>
+                </div>
+              )}
               {cancelForwarding ? (
                 <ForwardConfBtn
                   text={"Allow Forwarding"}
@@ -320,7 +579,8 @@ function ComposeBox({
                     userHome,
                     setisDisabled,
                     depth,
-                    cancelForwarding
+                    cancelForwarding,
+                    false
                   );
                 }}
                 isdisabled={isDisabled}
@@ -344,12 +604,54 @@ function ComposeBox({
                 toAddress,
                 setEncryption,
                 setDepth,
-                true
+                true,
+                passphrase
               )
             }
             isdisabled={isDisabled}
             setisDisabled={setisDisabled}
           />
+          {showPassphraseBox && (
+            <div className="">
+              <input
+                id="passphrase"
+                type="text"
+                placeholder="Enter passphrase"
+                className=" bg-BannerCardBackground  w-full outline-none "
+              />
+              <button
+                className="p-2 bg-BannerCardButtonBackground items-center text-BannerCardButtonText self-end flex font-bold px-2 rounded-md shadow-lg m-2 z-50 "
+                onClick={() => {
+                  console.log(document.getElementById("passphrase").value);
+                  setPassphrase(document.getElementById("passphrase").value);
+                  setShowPassphraseBox(false);
+                  // handler();
+                }}
+              >
+                Submit
+              </button>
+            </div>
+          )}
+          {showPasswordBox && (
+            <div className="">
+              <input
+                id="passwordE2E"
+                type="text"
+                placeholder="Enter password"
+                className=" bg-BannerCardBackground  w-full outline-none "
+              />
+              <button
+                className="p-2 bg-BannerCardButtonBackground items-center text-BannerCardButtonText self-end flex font-bold px-2 rounded-md shadow-lg m-2 z-50 "
+                onClick={() => {
+                  setPassword(document.getElementById("passwordE2E").value);
+                  setShowPasswordBox(false);
+                  // handler();
+                }}
+              >
+                Submit
+              </button>
+            </div>
+          )}
           {cancelForwarding ? (
             <ForwardConfBtn
               text={"Allow Forwarding"}
@@ -377,7 +679,8 @@ function ComposeBox({
                 userHome,
                 setisDisabled,
                 depth,
-                cancelForwarding
+                cancelForwarding,
+                true
               )
             }
           />
@@ -392,192 +695,6 @@ function ComposeBox({
       )}
     </Resizable>
   );
-}
-
-async function encryptHandler(
-  body,
-  setbody,
-  setShowPuKey,
-  setisDisabled,
-  userHome,
-  toAddress,
-  setEncryption,
-  setDepth,
-  externalEncrypt
-) {
-  let privateKey = localStorage.getItem(`privateKey:${userHome}`);
-  if (!privateKey) {
-    const token = localStorage.getItem(`token:${userHome}`);
-    privateKey = (
-      await axios.post(
-        `http://0.0.0.0:3000/user/private-key/${token.substring(
-          1,
-          token.length - 1
-        )}`
-      )
-    ).data.privateKey;
-  } else {
-    let temp = "";
-    for (let i = 0; i < privateKey.length - 1; i++) {
-      if (privateKey.charAt(i) === "\\" && privateKey.charAt(i + 1) === "n") {
-        i++;
-        continue;
-      }
-      temp = temp + privateKey.charAt(i);
-    }
-    privateKey = temp.substring(1, temp.length - 1) + "-";
-  }
-
-  const decipher = crypto.createDecipheriv(algorithm, aes_key, iv);
-
-  let decrypted = decipher.update(privateKey, "base64url", "utf8");
-  // decrypted += decipher.final("utf-8");
-  privateKey = decrypted;
-
-  privateKey = privateKey.substring(0, privateKey.lastIndexOf("-") + 1);
-  if (!externalEncrypt) {
-    let publicKey = (
-      await axios.get(`http://0.0.0.0:3000/user/public-key/${toAddress}`)
-    ).data.publicKey;
-    console.log(toAddress, publicKey);
-    if (!publicKey) {
-      alert(
-        "The recipient is not a registered KryptMail user, you can risk sending it without encryption or enter their public key below"
-      );
-      setShowPuKey(true);
-      setisDisabled(true);
-    } else {
-      body = await encrypt(
-        await encrypt(body, privateKey, "private"),
-        publicKey,
-        "public"
-      );
-      const html =
-        body +
-        'Break from here <br><p>If you are using a different client other than KryptMail try using <a href="https://www.freecodecamp.org/" target="_blank" rel="noopener noreferrer">this</a> link.</p>';
-      setbody(html);
-      setEncryption(true);
-      setDepth(2);
-    }
-  } else {
-    body = await encrypt(body, privateKey, "private");
-    setbody(body);
-    setEncryption(true);
-    setDepth(1);
-  }
-}
-
-async function storeMail({
-  messageId,
-  to,
-  from,
-  content,
-  depth,
-  forwardable = true,
-  timecode = -1, // month, hour, sec, days
-  timeframe = -1, // how long
-}) {
-  // while (true) {
-  const success = (
-    await axios.post(`http://0.0.0.0:3000/mail`, {
-      messageId,
-      to,
-      from,
-      content,
-      depth,
-      forwardable,
-      timecode,
-      timeframe,
-    })
-  ).data.success;
-  // if (success) break;
-  // }
-}
-
-async function SendPublicKey(
-  toAddress,
-  publicKey,
-  setShowPuKey,
-  setisDisabled
-) {
-  console.log(toAddress, publicKey);
-  await axios.post(`http://0.0.0.0:3000/user/public-key/${toAddress}`, {
-    publicKey: publicKey["data"],
-  });
-  setShowPuKey(false);
-  setisDisabled(false);
-}
-
-async function encrypt(body, key, type) {
-  const encryptKey = new NodeRSA(key);
-  console.log(key);
-  let result;
-  switch (type) {
-    case "public":
-      result = encryptKey.encrypt(body, "base64");
-      break;
-    case "private":
-      console.log("encrypting with private key");
-      result = encryptKey.encryptPrivate(body, "base64");
-      break;
-    default:
-      result = encryptKey.encrypt(body, "base64");
-  }
-  console.log(result);
-  return result;
-}
-
-async function SendMail(
-  toAddress,
-  subject,
-  body,
-  fileUri,
-  setFile,
-  userHome,
-  setisDisabled,
-  depth,
-  cancelForwarding
-) {
-  setisDisabled(true);
-  const conf = JSON.parse(readFile(path.join(userHome, "smtp.txt")))
-    ? JSON.parse(readFile(path.join(userHome, "smtp.txt")))
-    : null;
-  const transporter = nodemailer.createTransport(conf);
-  let content = null;
-  let token;
-  if (depth === 1 || cancelForwarding) {
-    content = body;
-    token = v4();
-    body = `Open this <a href="http://localhost:8080/?messageId=${token}" target="_blank" rel="noopener noreferrer">link</a> to view the mail`;
-  }
-  let mailOptions = {
-    from: userHome,
-    to: toAddress,
-    subject: subject,
-    text: body,
-    html: body,
-    attachments: fileUri?.length > 0 ? fileUri : false,
-  };
-  transporter.sendMail(mailOptions, async function (error, info) {
-    if (error) {
-      alert("error sending mail");
-      setisDisabled(false);
-    } else {
-      alert("message sent successfully");
-      console.log(cancelForwarding, "skjndvjsd");
-      await storeMail({
-        messageId: token ? token : info.messageId,
-        to: toAddress,
-        from: userHome,
-        content: content ? content : body,
-        depth: depth,
-        forwardable: !cancelForwarding,
-      });
-      setFile([]);
-      transporter.close();
-      setisDisabled(false);
-    }
-  });
 }
 
 export default ComposeBox;

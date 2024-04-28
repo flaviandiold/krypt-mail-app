@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import {
   MdAlternateEmail,
+  MdOutlineDoorFront,
   MdVisibility,
   MdVisibilityOff,
 } from "react-icons/md";
@@ -16,109 +17,144 @@ import { checkExists, createFolder, WriteFile } from "~/lib/fileAction";
 import WindowBar from "../components/TopBar/WindowBar";
 import { readFile } from "../lib/fileAction";
 import { applyTheme } from "../themes/themeutil";
-import { setUser } from "../redux/actions/UserActions";
+import { setUser, setUsersList } from "../redux/actions/UserActions";
 import { Link } from "react-router-dom";
+// import * as encoder from "bcrypt";
+
+const axios = require("axios");
 
 const { ImapFlow } = require("imapflow");
 const path = require("path");
 const pino = require("pino")();
 pino.level = "silent";
 
+// const location = useLocation();
 
 function Register({ frommultiuser }) {
-  const [email, setemail] = useState("");
-  const [password, setpassword] = useState("");
-  const [name, setname] = useState("");
-  const [Port] = useState(993);
+  let [email, setemail] = useState("");
+  let [password, setpassword] = useState("");
+  let [passphrase, setpassphrase] = useState("");
   const [visible, setvisible] = useState(true);
-  const [isSecure] = useState(true);
-  const [Host, setHost] = useState("");
   const [Errors, setErrors] = useState("");
-  const [port, setport] = useState("993");
-  const [smtpHost, setsmtpHost] = useState("");
-  const [smtpPort, setsmtpPort] = useState(465);
   const [securesmtp] = useState(true);
   let client;
   const dispatch = useDispatch();
-  const [selected] = useState({
-    host: ManualSetup[1].options[0].host,
-    secure: isSecure,
-    port: Port,
+
+  const imapObj = {
+    secure: true,
     logger: pino,
+    tls: {
+      rejectUnauthorized: false,
+    },
     auth: {
-      user: email,
-      pass: password,
+      user: "",
+      pass: "",
       accessToken: null,
     },
-  });
+  };
 
   let smtpobj = {
-    host: "",
-    secure: securesmtp,
-    port: smtpPort,
+    tls: {
+      rejectUnauthorized: false,
+    },
     auth: {
-      user: email,
-      pass: password
-    }
-  }
+      user: "",
+      pass: "",
+    },
+  };
 
   useEffect(() => {
     dispatch(setLoading(false));
     if (!frommultiuser) {
       applyTheme("Light");
     }
-    return () => { };
+    return () => {};
   }, []);
 
-  async function onSuccess(res) {
-    let accountexists = false;
-    selected.auth.user = res?.profileObj?.email;
-    selected.auth.accessToken = res?.accessToken;
-    delete selected.auth.pass;
-    client = new ImapFlow(selected);
-    let result = await LogintoAccount(client);
-    if (result && typeof (result == 'boolean') && result == true) {
-      let userslist = JSON.parse(readFile("userslist"));
-      let obj = userslist && userslist?.length > 0 && userslist?.find((o, i) => {
-        if (o?.auth?.user === res?.profileObj?.email) {
-          alert("account already exists");
-          accountexists = true;
-          dispatch(setLoading(false));
-          return true;
-        }
-      });
-      if (!accountexists) {
-        onResultTrue(res?.profileObj?.email);
-      }
-    } else {
-      console.log(result);
-    }
-  }
-
-  function onFailure(err) {
-    console.log(err);
-    setErrors(err);
-  }
-
-  function onResultTrue(email, selected) {
+  function onResultTrue(email, imapObj) {
     if (checkExists("")) {
       if (checkExists(email)) {
-        StoreInfo(email, selected);
+        StoreInfo(email, imapObj);
       } else {
         createFolder(email);
         createFolder(path.join(email, "conf"));
-        StoreInfo(email, selected);
+        StoreInfo(email, imapObj);
       }
     } else {
       createFolder("");
       createFolder(email);
       createFolder(path.join(email, "conf"));
-      StoreInfo(email, selected);
+      StoreInfo(email, imapObj);
     }
   }
 
-  const onRegisterClick = async () => {
-      console.log('register');
+  const onLoginClick = async () => {
+    console.log("comes here login/add user");
+    try {
+      dispatch(setLoading(true));
+      if (!email || !password || !passphrase) {
+        setErrors("input fields cannot be empty");
+        dispatch(setLoading(false));
+      } else {
+        email = email.includes("@") ? email : email + "@kryptmail.com";
+        (imapObj.auth.user = smtpobj.auth.user = email),
+          (imapObj.auth.pass = smtpobj.auth.pass = password);
+        const domain = email.split("@")[1]
+          ? email.split("@")[1]
+          : "kryptmail.com";
+        const serverDetails = ManualSetup[domain];
+        imapObj.host = serverDetails["imap-host"];
+        imapObj.port = serverDetails["imap-port"];
+        smtpobj.host = serverDetails["smtp-host"];
+        smtpobj.port = serverDetails["smtp-port"];
+        console.log(imapObj, smtpobj, "login details");
+        if (validateEmail(email)) {
+          try {
+            client = new ImapFlow(imapObj);
+            let result = await LogintoAccount(client);
+            if (result == true) {
+              console.log(imapObj);
+              // password = await encoder.hash(password, 10);
+              const data = (
+                await axios.post("http://0.0.0.0:3000/user/register", {
+                  email,
+                  password,
+                  passphrase,
+                })
+              ).data;
+              console.log(data.privateKey, data.token);
+              if (!localStorage.getItem(`privateKey:${email}`)) {
+                // localStorage.setItem(
+                //   `privateKey:${email}`,
+                //   JSON.stringify(data.privateKey)
+                // );
+              }
+              if (!localStorage.getItem(`token:${email}`)) {
+                localStorage.setItem(
+                  `token:${email}`,
+                  JSON.stringify(data.token)
+                );
+              }
+              console.log(localStorage);
+              // onResultTrue(email, imapObj);
+              setErrors("User Registered");
+            } else {
+              setErrors("invalid credentials or configuration of your mail");
+              dispatch(setLoading(false));
+            }
+          } catch (error) {
+            console.log(error);
+            setErrors("something went wrong while logging in");
+            dispatch(setLoading(false));
+          }
+        } else {
+          setErrors("Email is not properly structured");
+          dispatch(setLoading(false));
+        }
+      }
+    } catch (error) {
+      alert(error);
+    }
   };
 
   function validateEmail(email) {
@@ -126,12 +162,12 @@ function Register({ frommultiuser }) {
     return re.test(email);
   }
 
-  function StoreInfo(email, selected) {
+  function StoreInfo(email, imapObj) {
     let accountexists = false;
     let userslist = JSON.parse(readFile("userslist"));
     if (userslist?.length > 0) {
       let obj = userslist.find((o, i) => {
-        if (o?.auth?.user === selected?.auth?.user) {
+        if (o?.auth?.user === imapObj?.auth?.user) {
           alert("account already exists");
           accountexists = true;
           dispatch(setLoading(false));
@@ -139,22 +175,22 @@ function Register({ frommultiuser }) {
         }
       });
       if (!accountexists) {
-        userslist?.push(selected);
+        userslist?.push(imapObj);
         WriteFile(path.join("userslist"), userslist);
       }
     } else {
       let usersarray = [];
-      usersarray[0] = selected;
+      usersarray[0] = imapObj;
+      userslist = usersarray;
       WriteFile(path.join("userslist"), usersarray);
     }
+    dispatch(setUsersList(userslist));
     if (frommultiuser) {
-      dispatch(setUser(selected));
+      dispatch(setUser(imapObj));
     }
     if (!accountexists) {
-      smtpobj = selected
-      WriteFile(path.join(email, "user.txt"), selected);
-      smtpobj.port = smtpPort
-      smtpobj.host = smtpHost
+      // smtpobj = imapObj;
+      WriteFile(path.join(email, "user.txt"), imapObj);
       delete smtpobj["logger"];
       delete smtpobj["auth"]["accessToken"];
       smtpobj.secure = securesmtp;
@@ -169,14 +205,14 @@ function Register({ frommultiuser }) {
       {!frommultiuser && <WindowBar icon={false} />}
       <section
         className={
-        //   !frommultiuser
-            "relative flex flex-wrap lg:h-[calc(100vh_-_2rem)]  lg:items-center justify-center text-text  bg-cover "
-            // ""
+          !frommultiuser
+            ? "relative flex flex-wrap lg:h-[calc(100vh_-_2rem)] bg['/src/main/helpers/assets/LoginBg.jpg'] lg:items-center justify-center text-text  bg-cover "
+            : ""
         }
       >
         <div
           className={
-            // !frommultiuser &&
+            !frommultiuser &&
             "w-max px-2 py-12  sm:px-6 lg:px-4 sm:py-10 lg:py-14 bg-background shadow-lg rounded-md"
           }
         >
@@ -186,9 +222,7 @@ function Register({ frommultiuser }) {
                 ? " Incoming Server Settings"
                 : "Add user to the app"}
             </h1>
-            <p className="mt-4 text-text">
-              Register
-            </p>
+            <p className="mt-4 text-text">Login</p>
           </div>
           <div className="max-w-xl mx-auto mt-8  mb-0 space-y-4 ">
             <div className="grid grid-cols-2 ">
@@ -209,22 +243,28 @@ function Register({ frommultiuser }) {
                 setvisible={setvisible}
               />
             </div>
-            <div className="grid grid-cols-1  ">
+            <InputField
+              label="passphrase"
+              placeholder="Enter Passphrase for your key"
+              value={passphrase}
+              updatedValue={setpassphrase}
+            />
+            {/* <div className="grid grid-cols-2  ">
               <InputField
-                label="name"
-                placeholder="Enter Name"
+                label="host"
+                placeholder="Enter Imap Host"
                 Icon={FiServer}
-                value={name}
+                value={Host}
                 updatedValue={setHost}
               />
-              {/* <InputField
+              <InputField
                 label="port"
                 placeholder="Enter Imap Port"
                 Icon={MdOutlineDoorFront}
                 value={port}
                 updatedValue={setport}
-              /> */}
-              {/* <InputField
+              />
+              <InputField
                 label="port"
                 placeholder="Enter Smtp Host"
                 Icon={FiServer}
@@ -237,24 +277,17 @@ function Register({ frommultiuser }) {
                 Icon={MdOutlineDoorFront}
                 value={smtpPort}
                 updatedValue={setsmtpPort}
-              /> */}
-            </div>
+              />
+            </div> */}
             <div className="flex items-center justify-center ">
-              <Button
-                btntext={"Register"}
-                handler={onRegisterClick}
-              />
-            
-            <Link
-                  to={{ pathname: "/" }}
-                  state={'/'}
-                >
-                  <Button
-                btntext={"Login"}
-              />
+              <Button btntext={"Register"} handler={onLoginClick} />
+
+              {!frommultiuser && (
+                <Link to={{ pathname: "/" }} state={"/"}>
+                  <Button btntext={"Login"} />
                 </Link>
-            
-          </div>
+              )}
+            </div>
             {Errors && (
               <span className="font-extrabold text-primary-text mt-4 text-center align-middle ">
                 {Errors}

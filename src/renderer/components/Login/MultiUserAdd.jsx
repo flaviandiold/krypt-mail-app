@@ -1,8 +1,11 @@
-import React from "react";
+import React, { useState } from "react";
 import { MdOutlineClose } from "react-icons/md";
+import Register from "../../pages/Register";
 import Login from "../../pages/Login";
+import Button from "../Basic/Button";
 
 function MultiUserAdd({ setModalOpen }) {
+  const [login, setLogin] = useState(true);
   return (
     <div
       className="fixed z-50 inset-0 overflow-y-auto"
@@ -33,11 +36,17 @@ function MultiUserAdd({ setModalOpen }) {
               />
             </span>
           </div>
-          <div className="bg-secondary  ">
-            <Login frommultiuser={true} 
-            
-            />
-          </div>
+          {login ? (
+            <div className="bg-secondary  ">
+              <Login frommultiuser={true} />
+              <Button btntext={"Register"} handler={() => setLogin(false)} />
+            </div>
+          ) : (
+            <div className="bg-secondary  ">
+              <Register frommultiuser={true} />
+              <Button btntext={"Login"} handler={() => setLogin(true)} />
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -45,4 +54,3 @@ function MultiUserAdd({ setModalOpen }) {
 }
 
 export default MultiUserAdd;
-
