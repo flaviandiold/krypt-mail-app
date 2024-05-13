@@ -166,6 +166,7 @@ function DisplayMails({
                     {from}
                     <div className="  ">
                       <div className=" ">
+                        {console.log(mailinfo)}
                         {mailinfo && <ToolTip mailInfo={mailinfo} />}
                       </div>
                     </div>
@@ -186,10 +187,15 @@ function DisplayMails({
               </div>
             </div>
           </div>
-          <div className=" justify-center text-text items-center flex p-4">
+          <div className="justify-center text-text items-center flex p-4">
             <iframe
-              srcDoc={mail}
-              className="w-full aspect-video border-0  text-text overflow-y-scroll h-full  body"
+              srcDoc={isForwardable ? mail : `<div style="user-select: none; 
+              @media print {
+                html, body {
+                  display: none;
+                }
+              }">${mail}</div>`}
+              className="w-full aspect-video border-0 text-text overflow-y-scroll h-full body"
             />
           </div>
           <div className=" grid grid-cols-2 ">
